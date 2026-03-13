@@ -10,9 +10,17 @@
 
 **HCP does NOT support SIP trunking and exposes no telephony media stream API.** However, HCP Voice *does* support forwarding calls to an external phone number via its Call Flow system. This means the recommended integration path is:
 
-> Configure HCP to forward unanswered or after-hours calls to a Twilio number we control. Twilio answers and runs the AI agent. HCP receives the resulting job/lead via REST API after the call.
+> Change the existing HCP call forward destination from the Wisconsin call center to our Twilio number. Twilio answers every call and runs the AI agent 24/7. HCP receives the resulting job/lead via REST API after the call ends.
 
-This is viable, well-documented, and requires zero changes to Bremray's existing HCP setup beyond a one-time call-flow configuration.
+This is viable, well-documented, and requires a **single change** to the existing HCP call flow — swap the forward destination.
+
+### Confirmed Answers (2026-03-13)
+
+| Question | Answer |
+|---|---|
+| Is a call forward already configured in HCP Voice? | **Yes** — currently forwarding to Wisconsin call center. Change destination to Twilio number. |
+| Is Bremray on the HCP MAX plan? | **Yes** — CRM webhooks available if needed. |
+| Should the agent handle all calls or only after-hours? | **All calls, 24/7.** After-hours callers must be told callbacks won't happen until next business morning (Mon–Fri 8 AM–5 PM EST). |
 
 ---
 
@@ -61,33 +69,35 @@ HCP launched **CSR AI** in January 2025 — their own 24/7 AI-powered answering 
 ```
 Caller → (734) 216-9437 [HCP number]
            │
-           ├─ During business hours, ring answered → HCP handles normally
-           │
-           └─ After hours / no answer (rollover) → Forward to Twilio number
-                                                        │
-                                                    Twilio webhook
-                                                        │
-                                                    Our Node.js server
-                                                        │
-                                                    Gemini Live API
-                                                        │
-                                                    AI agent handles call
-                                                        │
-                                                    HCP REST API → create job/lead
-                                                    Twilio SMS → notify Brent & Rayno
-                                                    Gmail SMTP → email bremrayllc@gmail.com
+           └─ ALL calls (24/7) → Forward to Twilio number
+                                        │
+                                    Twilio webhook → /inbound-call
+                                        │
+                                    Our Node.js server
+                                        │
+                                    Gemini Live API (WebSocket)
+                                        │
+                                    AI agent handles call
+                                    (business hours vs. after-hours
+                                     behavior determined in agent logic,
+                                     not in HCP call flow)
+                                        │
+                                    HCP REST API → create job/lead
+                                    Twilio SMS → notify Brent & Rayno
+                                    Gmail SMTP → email bremrayllc@gmail.com
 ```
 
-**No changes are needed to HCP's existing number.** Bremray keeps `(734) 216-9437` as their business number. The AI agent only needs a Twilio number to receive the forwarded calls (can be any number — it is never given to customers).
+**No changes are needed to HCP's existing number.** Bremray keeps `(734) 216-9437` as their business number. The AI agent only needs a Twilio number to receive the forwarded calls (never given to customers).
 
 ### Call Flow Configuration in HCP
 
+Since the agent handles all calls, the HCP call flow is simple:
+
 1. Log into HCP → Settings → Communications → Voice tab
 2. Open the Call Flow for the main number
-3. Add a **Call Hours Widget** configured for business hours (Mon–Fri 8 AM–5 PM EST)
-4. For the "closed" path: add a **Forward Call Widget** pointing to the Twilio number
-5. Set forward transfer timeout to ~20 seconds (per HCP Assist recommendation)
-6. Enable **caller ID forwarding** so the Twilio webhook receives the original caller's number
+3. **Change the existing forward destination** (currently Wisconsin call center) to the Twilio number
+4. Set routing to **24/7** (no hours widget needed — agent handles time-awareness in code)
+5. Enable **caller ID forwarding** so the Twilio webhook receives the original caller's number
 
 ### Environment Variable Impact
 
@@ -99,12 +109,6 @@ HCP_BUSINESS_NUMBER=+17342169437   # HCP's number — for reference only, not a 
 ```
 
 ---
-
-## Open Questions for Emille
-
-1. **Does Bremray already forward unanswered calls somewhere?** (Currently to the Wisconsin call center) — If so, the HCP call flow is already partially set up and just needs the destination changed to our Twilio number.
-2. **Is the existing HCP Voice subscription the MAX plan?** Webhooks on the CRM side require MAX. Call forwarding does not.
-3. **Do you want the AI agent to answer all calls, or only after-hours/overflow?** During business hours, Rayno currently fields some calls. The call flow can be configured either way.
 
 ---
 
